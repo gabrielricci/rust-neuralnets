@@ -1,0 +1,12 @@
+[package]
+name = "rust_ddn"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+ndarray = { version = "0.15.6", features = ["serde"] }
+num-integer = "0.1.45"
+polars = { version = "0.33.2", features = ["lazy", "ndarray"] }
+rand = "0.8.5"
