@@ -1,10 +1,12 @@
+pub mod activation;
+pub mod datasets;
+
+use crate::neuralnet::activation::*;
+
 use ndarray::prelude::*;
-use polars::prelude::*;
 use rand::distributions::Uniform;
 use rand::prelude::*;
 use std::collections::HashMap;
-use std::f32::consts::E;
-use std::path::PathBuf;
 
 trait Log {
     fn log(&self) -> Array2<f32>;
@@ -22,10 +24,11 @@ pub struct DeepNeuralNetwork {
     pub params: HashMap<String, Array2<f32>>,
 }
 
-#[derive(Clone, Debug)]
+// Can't use box and derive from Clone since Clone trait requires object to be sized, thus can't use Box
+// #[derive(Clone, Debug)]
 pub struct Layer {
     pub size: usize,
-    pub activation_function: String,
+    pub activation_function: Box<dyn ActivationFunction>,
 }
 
 #[derive(Clone, Debug)]
@@ -42,7 +45,7 @@ pub struct ActivationCache {
 
 impl DeepNeuralNetwork {
     pub fn initialize_params(&mut self) {
-        self.params = parameters_initialize(self.layers.clone());
+        self.params = parameters_initialize(&self.layers);
     }
 
     pub fn update_params(&mut self, gradients: &HashMap<String, Array2<f32>>, learning_rate: f32) {
@@ -146,7 +149,7 @@ impl DeepNeuralNetwork {
 }
 
 // parameter handling
-pub fn parameters_initialize(layers: Vec<Layer>) -> HashMap<String, Array2<f32>> {
+pub fn parameters_initialize(layers: &Vec<Layer>) -> HashMap<String, Array2<f32>> {
     // random number generator
     // let between = Uniform::from(-0.5..0.5); // random number between -1 and 1
     let mut rng = rand::thread_rng(); // random number generator
@@ -231,6 +234,17 @@ pub fn forward_propagate(
     (al, caches)
 }
 
+pub fn linear_forward_activation(
+    a: &Array2<f32>,
+    w: &Array2<f32>,
+    b: &Array2<f32>,
+    activation_fun: &Box<dyn ActivationFunction>,
+) -> Result<(Array2<f32>, (LinearCache, ActivationCache)), String> {
+    let (z, linear_cache) = linear_forward(a, w, b);
+    let a_next = activation_fun.activate(z.clone());
+    Ok((a_next, (linear_cache, ActivationCache { z })))
+}
+
 pub fn linear_forward(
     a: &Array2<f32>,
     w: &Array2<f32>,
@@ -244,30 +258,6 @@ pub fn linear_forward(
     };
 
     (z, cache)
-}
-
-pub fn linear_forward_activation(
-    a: &Array2<f32>,
-    w: &Array2<f32>,
-    b: &Array2<f32>,
-    activation: &str,
-) -> Result<(Array2<f32>, (LinearCache, ActivationCache)), String> {
-    let (z, linear_cache) = linear_forward(a, w, b);
-    match activation {
-        "sigmoid" => {
-            let (a_next, activation_cache) = sigmoid_activation(z);
-            Ok((a_next, (linear_cache, activation_cache)))
-        }
-        "relu" => {
-            let (a_next, activation_cache) = relu_activation(z);
-            Ok((a_next, (linear_cache, activation_cache)))
-        }
-        "softmax" => {
-            let (a_next, activation_cache) = softmax_activation(z);
-            Ok((a_next, (linear_cache, activation_cache)))
-        }
-        _ => Err("wrong activation method".to_string()),
-    }
 }
 
 // backward propagation
@@ -298,66 +288,14 @@ pub fn backward_propagate(
     gradients
 }
 
-// sigmoid functions
-pub fn sigmoid(z: &f32) -> f32 {
-    1.0 / (1.0 + E.powf(-z))
-}
-
-pub fn sigmoid_activation(z: Array2<f32>) -> (Array2<f32>, ActivationCache) {
-    (z.mapv(|x| sigmoid(&x)), ActivationCache { z })
-}
-
-pub fn sigmoid_derivative(z: &f32) -> f32 {
-    sigmoid(z) * (1.0 - sigmoid(z))
-}
-
-// softmax activation function
-// pub fn softmax(z: &f32) -> f32 {
-//    E.powf(*z) / E.powf(*z).exp()
-// }
-
-pub fn softmax_activation(z: Array2<f32>) -> (Array2<f32>, ActivationCache) {
-    let exp_values = z.mapv(|x| E.powf(x));
-    (
-        exp_values.clone() / &exp_values.sum_axis(Axis(1)).insert_axis(Axis(1)),
-        ActivationCache { z },
-    )
-}
-
-// relu activation function
-pub fn relu(z: &f32) -> f32 {
-    match *z > 0.0 {
-        true => *z,
-        false => 0.0,
-    }
-}
-
-pub fn relu_activation(z: Array2<f32>) -> (Array2<f32>, ActivationCache) {
-    (z.mapv(|x| relu(&x)), ActivationCache { z })
-}
-
-pub fn relu_derivative(z: &f32) -> f32 {
-    match *z > 0.0 {
-        true => 1.0,
-        false => 0.0,
-    }
-}
-
-// linear backward
 pub fn linear_backward_activation(
     da: &Array2<f32>,
     cache: (LinearCache, ActivationCache),
-    labels: &Array2<f32>,
-    activation: &str,
+    _labels: &Array2<f32>,
+    activation_fun: &Box<dyn ActivationFunction>,
 ) -> (Array2<f32>, Array2<f32>, Array2<f32>) {
     let (linear_cache, activation_cache) = cache;
-
-    let dz: Array2<f32> = match activation {
-        "sigmoid" => da * activation_cache.z.mapv(|x| sigmoid_derivative(&x)),
-        "relu" => da * activation_cache.z.mapv(|x| relu_derivative(&x)),
-        "softmax" => da - labels,
-        _ => panic!("Unsupported activation function"),
-    };
+    let dz: Array2<f32> = activation_fun.derive(da.clone(), activation_cache.z);
 
     let (a_prev, w, _b) = (linear_cache.a, linear_cache.w, linear_cache.b);
     let m = a_prev.shape()[1] as f32;
@@ -379,21 +317,6 @@ pub fn one_hot_encode(labels: &Array2<f32>, num_classes: usize) -> Array2<f32> {
     }
 
     one_hot_matrix
-}
-
-pub fn dataframe_from_csv(filepath: PathBuf) -> PolarsResult<(DataFrame, DataFrame)> {
-    let data = CsvReader::from_path(filepath)?.has_header(true).finish()?;
-
-    let training_dataset = data.drop("label")?;
-    let training_labels = data.select(["label"])?;
-
-    Ok((training_dataset, training_labels))
-}
-
-pub fn array_from_dataframe(df: &DataFrame) -> Array2<f32> {
-    df.to_ndarray::<Float32Type>(IndexOrder::C)
-        .unwrap()
-        .reversed_axes()
 }
 
 // helpers

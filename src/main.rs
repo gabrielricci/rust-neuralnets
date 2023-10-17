@@ -1,5 +1,7 @@
 mod neuralnet;
 
+use neuralnet::activation::*;
+use neuralnet::datasets::*;
 use neuralnet::*;
 use std::collections::HashMap;
 
@@ -23,15 +25,15 @@ fn main() {
         layers: vec![
             Layer {
                 size: 784,
-                activation_function: "none".to_string(),
+                activation_function: Box::new(ReLU {}),
             },
             Layer {
                 size: 10,
-                activation_function: "relu".to_string(),
+                activation_function: Box::new(ReLU {}),
             },
             Layer {
                 size: 10,
-                activation_function: "sigmoid".to_string(),
+                activation_function: Box::new(Sigmoid {}), // TODO: Not ideal for outputs w/ multiple classes, but my softmax is broken :(
             },
         ],
         learning_rate: 0.1,
