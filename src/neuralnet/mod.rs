@@ -24,8 +24,6 @@ pub struct DeepNeuralNetwork {
     pub params: HashMap<String, Array2<f32>>,
 }
 
-// Can't use box and derive from Clone since Clone trait requires object to be sized, thus can't use Box
-// #[derive(Clone, Debug)]
 pub struct Layer {
     pub size: usize,
     pub activation_function: Box<dyn ActivationFunction>,
@@ -33,7 +31,7 @@ pub struct Layer {
 
 #[derive(Clone, Debug)]
 pub struct LinearCache {
-    a: Array2<f32>,
+    a_prev: Array2<f32>,
     w: Array2<f32>,
     b: Array2<f32>,
 }
@@ -49,8 +47,7 @@ impl DeepNeuralNetwork {
     }
 
     pub fn update_params(&mut self, gradients: &HashMap<String, Array2<f32>>, learning_rate: f32) {
-        self.params =
-            parameters_update(&self.layers, self.params.clone(), gradients, learning_rate);
+        self.params = parameters_update(&self.layers, &self.params, gradients, learning_rate);
     }
 
     pub fn forward_propagate(
@@ -69,23 +66,6 @@ impl DeepNeuralNetwork {
         backward_propagate(&self.layers, al, labels, caches)
     }
 
-    // START OF TEST FUNCTIONS
-    pub fn cost(&self, al: &Array2<f32>, y: &Array2<f32>) -> f32 {
-        let m = y.shape()[1] as f32;
-
-        // Clip AL to avoid log(0) and log(1)
-        // let al_clip = al.clone();
-        // let al_clip = al.mapv(|x| x.max(1e-15).min(1.0 - 1e-15));
-
-        //let yt = &y.clone().reversed_axes();
-        // let cost = (-1.0 / m) * (yt * &al_clip.log() + (1.0 - yt) * &(1.0 - &al_clip).log());
-        let cost = -(1.0 / m)
-            * (y.dot(&al.clone().reversed_axes().log())
-                + (1.0 - y).dot(&(1.0 - al).reversed_axes().log()));
-
-        cost.sum()
-    }
-
     pub fn train_model(
         &mut self,
         x_train_data: &Array2<f32>,
@@ -93,21 +73,22 @@ impl DeepNeuralNetwork {
         iterations: usize,
         learning_rate: f32,
     ) {
-        let mut costs: Vec<f32> = vec![];
+        // set decay rate
+        // let decay_rate: f32 = 0.99;
 
         for i in 0..iterations {
-            let (al, caches) = self.forward_propagate(&x_train_data);
-            let cost = self.cost(&al, &y_train_data);
-            let grads = self.backward_propagate(&al, &y_train_data, caches);
-
+            let (al, caches) = self.forward_propagate(x_train_data);
+            let grads = self.backward_propagate(&al, y_train_data, caches);
             self.update_params(&grads.clone(), learning_rate);
 
+            // decay learning rate
+            // self.learning_rate *= decay_rate.powf(i as f32);
+
             if i % 5 == 0 {
-                costs.append(&mut vec![cost]);
                 let (corrects, score) = self.score(&al, y_train_data);
                 println!(
-                    "Epoch: {}/{} - Score: {} (corrects: {})",
-                    i, iterations, score, corrects
+                    "Epoch: {}/{} - Score: {} (corrects: {}) - Learning rate: {}",
+                    i, iterations, score, corrects, self.learning_rate
                 );
             }
         }
@@ -115,8 +96,6 @@ impl DeepNeuralNetwork {
 
     pub fn predict(&self, x_test_data: &Array2<f32>) -> Array2<f32> {
         let (al, _) = self.forward_propagate(x_test_data);
-        //let y_hat = al.map(|x| (x > &0.5) as i32 as f32);
-        //y_hat
         al
     }
 
@@ -150,11 +129,11 @@ impl DeepNeuralNetwork {
 
 // parameter handling
 pub fn parameters_initialize(layers: &Vec<Layer>) -> HashMap<String, Array2<f32>> {
-    // random number generator
-    // let between = Uniform::from(-0.5..0.5); // random number between -1 and 1
-    let mut rng = rand::thread_rng(); // random number generator
-
     let mut parameters: HashMap<String, Array2<f32>> = HashMap::new();
+
+    // random number generator
+    let mut rng = rand::thread_rng();
+    // let between = Uniform::from(-0.5..0.5); // random number between a fixed range
 
     for l in 1..layers.len() {
         // He Initialization
@@ -166,7 +145,9 @@ pub fn parameters_initialize(layers: &Vec<Layer>) -> HashMap<String, Array2<f32>
             .map(|_| between.sample(&mut rng))
             .collect();
 
-        let biases_array: Vec<f32> = (0..layer_size(&layers[l])).map(|_| 0.0).collect();
+        let biases_array: Vec<f32> = (0..layer_size(&layers[l]))
+            .map(|_| between.sample(&mut rng))
+            .collect();
 
         let weight_matrix = Array::from_shape_vec(
             (layer_size(&layers[l]), layer_size(&layers[l - 1])),
@@ -180,32 +161,53 @@ pub fn parameters_initialize(layers: &Vec<Layer>) -> HashMap<String, Array2<f32>
         let weight_string = ["W", &l.to_string()].join("").to_string();
         let biases_string = ["b", &l.to_string()].join("").to_string();
 
+        println!("{} - {:?}", weight_string, weight_matrix);
+        println!("{} - {:?}", biases_string, biases_matrix);
+
         parameters.insert(weight_string, weight_matrix);
         parameters.insert(biases_string, biases_matrix);
     }
+
+    // test code used to force weights and biases
+    // let w1 = load_array_from_csv("srcw1.csv".into());
+    // let w2 = load_array_from_csv("src/w2.csv".into());
+    // let b1 = load_array_from_csv("src/b1.csv".into());
+    // let b2 = load_array_from_csv("src/b2.csv".into());
+
+    // parameters.insert("W1".into(), w1);
+    // parameters.insert("W2".into(), w2);
+    // parameters.insert("b1".into(), b1);
+    // parameters.insert("b2".into(), b2);
 
     parameters
 }
 
 pub fn parameters_update(
     layers: &Vec<Layer>,
-    mut params: HashMap<String, Array2<f32>>,
+    params: &HashMap<String, Array2<f32>>,
     gradients: &HashMap<String, Array2<f32>>,
     learning_rate: f32,
 ) -> HashMap<String, Array2<f32>> {
+    let mut new_params: HashMap<String, Array2<f32>> = HashMap::new();
+
     for l in 1..layers.len() {
         let weight_string_grad = array_index("weight_derivative", &l);
         let bias_string_grad = array_index("bias_derivative", &l);
         let weight_string = array_index("weight", &l);
         let bias_string = array_index("bias", &l);
 
-        *params.get_mut(&weight_string).unwrap() = params[&weight_string].clone()
-            - (learning_rate * gradients[&weight_string_grad].clone());
-        *params.get_mut(&bias_string).unwrap() =
-            params[&bias_string].clone() - (learning_rate * gradients[&bias_string_grad].clone());
+        new_params.insert(
+            weight_string.clone(),
+            params[&weight_string].clone()
+                - (learning_rate * gradients[&weight_string_grad].clone()),
+        );
+        new_params.insert(
+            bias_string.clone(),
+            params[&bias_string].clone() - (learning_rate * gradients[&bias_string_grad].clone()),
+        );
     }
 
-    params
+    new_params
 }
 
 // forward propagation
@@ -214,7 +216,7 @@ pub fn forward_propagate(
     params: &HashMap<String, Array2<f32>>,
     inputs: &Array2<f32>,
 ) -> (Array2<f32>, HashMap<String, (LinearCache, ActivationCache)>) {
-    let mut al = inputs.clone();
+    let mut a_prev = inputs.clone();
     let mut caches: HashMap<String, (LinearCache, ActivationCache)> = HashMap::new();
 
     // we start from index one since we skip the input layer
@@ -224,40 +226,33 @@ pub fn forward_propagate(
         let biases = &params[&array_index("bias", &l)];
 
         let (a, cache_current) =
-            linear_forward_activation(&al, weights, biases, &current_layer.activation_function)
+            linear_forward_activation(&a_prev, weights, biases, &current_layer.activation_function)
                 .unwrap();
 
         caches.insert(l.to_string(), cache_current);
-        al = a;
+        a_prev = a;
     }
 
-    (al, caches)
+    // a_prev will be the activation of the output layer
+    (a_prev, caches)
 }
 
 pub fn linear_forward_activation(
-    a: &Array2<f32>,
+    a_prev: &Array2<f32>,
     w: &Array2<f32>,
     b: &Array2<f32>,
     activation_fun: &Box<dyn ActivationFunction>,
 ) -> Result<(Array2<f32>, (LinearCache, ActivationCache)), String> {
-    let (z, linear_cache) = linear_forward(a, w, b);
-    let a_next = activation_fun.activate(z.clone());
-    Ok((a_next, (linear_cache, ActivationCache { z })))
-}
+    let z = w.dot(a_prev) + b;
+    let a = activation_fun.activate(z.clone());
 
-pub fn linear_forward(
-    a: &Array2<f32>,
-    w: &Array2<f32>,
-    b: &Array2<f32>,
-) -> (Array2<f32>, LinearCache) {
-    let z = w.dot(a) + b;
-    let cache = LinearCache {
-        a: a.clone(),
+    let linear_cache = LinearCache {
+        a_prev: a_prev.clone(),
         w: w.clone(),
         b: b.clone(),
     };
 
-    (z, cache)
+    Ok((a, (linear_cache, ActivationCache { z })))
 }
 
 // backward propagation
@@ -268,35 +263,40 @@ pub fn backward_propagate(
     caches: HashMap<String, (LinearCache, ActivationCache)>,
 ) -> HashMap<String, Array2<f32>> {
     let mut gradients = HashMap::new();
-
-    // let mut dal = -(labels / outputs - (1.0 - labels) / (1.0 - outputs));
-    let mut dal = outputs.clone();
+    let mut dz_prev = outputs.clone();
+    // let mut dz_prev = -(labels / outputs - (1.0 - labels) / (1.0 - outputs));
 
     for l in (1..layers.len()).rev() {
         let current_cache = caches[&l.to_string()].clone();
-        let (da_prev, dw, db) =
-            linear_backward_activation(&dal, current_cache, labels, &layers[l].activation_function);
+
+        let (dz, dw, db) = linear_backward_activation(
+            &dz_prev,
+            current_cache,
+            labels,
+            &layers[l].activation_function,
+        );
 
         gradients.insert(array_index("weight_derivative", &l), dw);
         gradients.insert(array_index("bias_derivative", &l), db);
-        gradients.insert(array_index("activation_derivative", &l), da_prev.clone());
+        gradients.insert(array_index("activation_derivative", &l), dz.clone());
 
-        dal = da_prev;
+        dz_prev = dz;
     }
 
     gradients
 }
 
 pub fn linear_backward_activation(
-    da: &Array2<f32>,
+    dz_prev: &Array2<f32>,
     cache: (LinearCache, ActivationCache),
     labels: &Array2<f32>,
     activation_fun: &Box<dyn ActivationFunction>,
 ) -> (Array2<f32>, Array2<f32>, Array2<f32>) {
     let (linear_cache, activation_cache) = cache;
-    let dz: Array2<f32> = activation_fun.derive(da.clone(), activation_cache.z, labels.clone());
+    let (a_prev, w, _b) = (linear_cache.a_prev, linear_cache.w, linear_cache.b);
 
-    let (a_prev, w, _b) = (linear_cache.a, linear_cache.w, linear_cache.b);
+    let dz: Array2<f32> = activation_fun.derive(dz_prev.clone(), activation_cache.z, labels);
+
     let m = a_prev.shape()[1] as f32;
     let dw = (1.0 / m) * (dz.dot(&a_prev.reversed_axes()));
     let db_vec = ((1.0 / m) * dz.sum_axis(Axis(1))).to_vec();

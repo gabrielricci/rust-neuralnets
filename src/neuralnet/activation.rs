@@ -3,7 +3,7 @@ use std::f32::consts::E;
 
 pub trait ActivationFunction {
     fn activate(&self, z: Array2<f32>) -> Array2<f32>;
-    fn derive(&self, da: Array2<f32>, z: Array2<f32>, labels: Array2<f32>) -> Array2<f32>;
+    fn derive(&self, da: Array2<f32>, z: Array2<f32>, labels: &Array2<f32>) -> Array2<f32>;
 }
 
 pub struct Sigmoid {}
@@ -12,11 +12,10 @@ pub struct Softmax {}
 
 impl ActivationFunction for Sigmoid {
     fn activate(&self, z: Array2<f32>) -> Array2<f32> {
-        // println!("Z: {:?}", z);
         z.mapv(|x| sigmoid(&x))
     }
 
-    fn derive(&self, da: Array2<f32>, z: Array2<f32>, _labels: Array2<f32>) -> Array2<f32> {
+    fn derive(&self, da: Array2<f32>, z: Array2<f32>, _labels: &Array2<f32>) -> Array2<f32> {
         da * z.mapv(|x| sigmoid_derivative(&x))
     }
 }
@@ -26,21 +25,20 @@ impl ActivationFunction for ReLU {
         z.mapv(|x| relu(&x))
     }
 
-    fn derive(&self, da: Array2<f32>, z: Array2<f32>, _labels: Array2<f32>) -> Array2<f32> {
+    fn derive(&self, da: Array2<f32>, z: Array2<f32>, _labels: &Array2<f32>) -> Array2<f32> {
         da * z.mapv(|x| relu_derivative(&x))
     }
 }
 
 impl ActivationFunction for Softmax {
     fn activate(&self, z: Array2<f32>) -> Array2<f32> {
-        // println!("Z: {:?}", z);
-        let exps = z.mapv(|x| E.powf(x));
-        let sum_exps = exps.sum_axis(Axis(1));
+        let exps = z.mapv(|x| x.exp());
+        let sum_exps = exps.sum_axis(Axis(0));
 
-        exps / sum_exps.insert_axis(Axis(1))
+        exps / sum_exps.insert_axis(Axis(0))
     }
 
-    fn derive(&self, da: Array2<f32>, _z: Array2<f32>, labels: Array2<f32>) -> Array2<f32> {
+    fn derive(&self, da: Array2<f32>, _z: Array2<f32>, labels: &Array2<f32>) -> Array2<f32> {
         da - labels
     }
 }

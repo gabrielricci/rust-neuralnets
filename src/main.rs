@@ -36,7 +36,7 @@ fn main() {
                 activation_function: Box::new(Softmax {}),
             },
         ],
-        learning_rate: 0.0075,
+        learning_rate: 0.1,
         params: HashMap::new(),
     };
 

@@ -16,3 +16,13 @@ pub fn array_from_dataframe(df: &DataFrame) -> Array2<f32> {
         .unwrap()
         .reversed_axes()
 }
+
+pub fn load_array_from_csv(filepath: PathBuf) -> Array2<f32> {
+    let data = CsvReader::from_path(filepath)
+        .unwrap()
+        .has_header(false)
+        .finish()
+        .unwrap();
+
+    data.to_ndarray::<Float32Type>(IndexOrder::C).unwrap()
+}
