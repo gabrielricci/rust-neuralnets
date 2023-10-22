@@ -269,10 +269,9 @@ pub fn backward_propagate(
 ) -> HashMap<String, Array2<f32>> {
     let mut gradients = HashMap::new();
 
-    // calculate the derivative of the activation of the layer (output in this case)
-    let mut dal = -(labels / outputs - (1.0 - labels) / (1.0 - outputs));
+    // let mut dal = -(labels / outputs - (1.0 - labels) / (1.0 - outputs));
+    let mut dal = outputs.clone();
 
-    // again we skip the first layer, which is the input one
     for l in (1..layers.len()).rev() {
         let current_cache = caches[&l.to_string()].clone();
         let (da_prev, dw, db) =
@@ -291,11 +290,11 @@ pub fn backward_propagate(
 pub fn linear_backward_activation(
     da: &Array2<f32>,
     cache: (LinearCache, ActivationCache),
-    _labels: &Array2<f32>,
+    labels: &Array2<f32>,
     activation_fun: &Box<dyn ActivationFunction>,
 ) -> (Array2<f32>, Array2<f32>, Array2<f32>) {
     let (linear_cache, activation_cache) = cache;
-    let dz: Array2<f32> = activation_fun.derive(da.clone(), activation_cache.z);
+    let dz: Array2<f32> = activation_fun.derive(da.clone(), activation_cache.z, labels.clone());
 
     let (a_prev, w, _b) = (linear_cache.a, linear_cache.w, linear_cache.b);
     let m = a_prev.shape()[1] as f32;

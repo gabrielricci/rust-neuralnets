@@ -33,10 +33,10 @@ fn main() {
             },
             Layer {
                 size: 10,
-                activation_function: Box::new(Sigmoid {}), // TODO: Not ideal for outputs w/ multiple classes, but my softmax is broken :(
+                activation_function: Box::new(Softmax {}),
             },
         ],
-        learning_rate: 0.1,
+        learning_rate: 0.0075,
         params: HashMap::new(),
     };
 

@@ -3,7 +3,7 @@ use std::f32::consts::E;
 
 pub trait ActivationFunction {
     fn activate(&self, z: Array2<f32>) -> Array2<f32>;
-    fn derive(&self, da: Array2<f32>, z: Array2<f32>) -> Array2<f32>;
+    fn derive(&self, da: Array2<f32>, z: Array2<f32>, labels: Array2<f32>) -> Array2<f32>;
 }
 
 pub struct Sigmoid {}
@@ -12,10 +12,11 @@ pub struct Softmax {}
 
 impl ActivationFunction for Sigmoid {
     fn activate(&self, z: Array2<f32>) -> Array2<f32> {
+        // println!("Z: {:?}", z);
         z.mapv(|x| sigmoid(&x))
     }
 
-    fn derive(&self, da: Array2<f32>, z: Array2<f32>) -> Array2<f32> {
+    fn derive(&self, da: Array2<f32>, z: Array2<f32>, _labels: Array2<f32>) -> Array2<f32> {
         da * z.mapv(|x| sigmoid_derivative(&x))
     }
 }
@@ -25,18 +26,22 @@ impl ActivationFunction for ReLU {
         z.mapv(|x| relu(&x))
     }
 
-    fn derive(&self, da: Array2<f32>, z: Array2<f32>) -> Array2<f32> {
+    fn derive(&self, da: Array2<f32>, z: Array2<f32>, _labels: Array2<f32>) -> Array2<f32> {
         da * z.mapv(|x| relu_derivative(&x))
     }
 }
 
 impl ActivationFunction for Softmax {
     fn activate(&self, z: Array2<f32>) -> Array2<f32> {
-        z.mapv(|x| softmax(&x))
+        // println!("Z: {:?}", z);
+        let exps = z.mapv(|x| E.powf(x));
+        let sum_exps = exps.sum_axis(Axis(1));
+
+        exps / sum_exps.insert_axis(Axis(1))
     }
 
-    fn derive(&self, _da: Array2<f32>, z: Array2<f32>) -> Array2<f32> {
-        softmax_derivative(z)
+    fn derive(&self, da: Array2<f32>, _z: Array2<f32>, labels: Array2<f32>) -> Array2<f32> {
+        da - labels
     }
 }
 
@@ -62,15 +67,4 @@ fn relu_derivative(z: &f32) -> f32 {
         true => 1.0,
         false => 0.0,
     }
-}
-
-// softmax functions
-// FIXME: This is broken, NN is not learning when using softmax as activation
-fn softmax(z: &f32) -> f32 {
-    E.powf(*z) / E.powf(*z).exp()
-}
-
-fn softmax_derivative(z: Array2<f32>) -> Array2<f32> {
-    let exp_values = z.mapv(|x| E.powf(x));
-    exp_values.clone() / &exp_values.sum_axis(Axis(1)).insert_axis(Axis(1))
 }
